@@ -48,14 +48,59 @@ def print(*args, **kwargs):
 # ==================== КОНЕЦ НАСТРОЙКИ ЛОГИРОВАНИЯ ====================
 
 
-class BackgroundMusic:
+# ==================== КЛАСС ДЛЯ СОХРАНЕНИЯ НАСТРОЕК ====================
+class SettingsStorage:
     def __init__(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.settings_file = os.path.join(script_dir, "settings.json")
+        self.settings = self.load_settings()
+
+    def load_settings(self):
+        """Загружает настройки из файла"""
+        default_settings = {
+            "questions_path": "",
+            "music_volume": 0.3
+        }
+
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    logger.log(f"⚙️ Загружены настройки из {self.settings_file}")
+                    return settings
+            else:
+                logger.log("⚙️ Файл настроек не найден, используются значения по умолчанию")
+                return default_settings
+        except Exception as e:
+            logger.log(f"❌ Ошибка загрузки настроек: {e}")
+            return default_settings
+
+    def save_settings(self, questions_path, music_volume):
+        """Сохраняет настройки в файл"""
+        try:
+            settings = {
+                "questions_path": questions_path,
+                "music_volume": music_volume
+            }
+
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+
+            logger.log(f"💾 Настройки сохранены: путь={questions_path}, громкость={music_volume}")
+            return True
+        except Exception as e:
+            logger.log(f"❌ Ошибка сохранения настроек: {e}")
+            return False
+
+
+class BackgroundMusic:
+    def __init__(self, initial_volume=0.3):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         music_path = os.path.join(script_dir, "resource", "ElectroDynamix.mp3")
 
         self.player = None
         self.is_playing = False
-        self.volume = 0.3
+        self.volume = initial_volume
 
         try:
             if os.path.exists(music_path):
@@ -108,7 +153,7 @@ class QuestionLoader:
         script_dir = os.path.dirname(os.path.abspath(__file__))
 
         # Если путь не указан, используем путь по умолчанию
-        if questions_path:
+        if questions_path and os.path.exists(questions_path):
             self.questions_file = questions_path
         else:
             self.questions_file = os.path.join(script_dir, "resource", "questions.json")
@@ -338,27 +383,74 @@ class QuestionWindow(pyglet.window.Window):
 
 
 # Окно настроек
+# Окно настроек
 class SettingsWindow(pyglet.window.Window):
-    def __init__(self, music_player, question_loader):
-        super().__init__(500, 400, "Настройки")
+    def __init__(self, music_player, question_loader, settings_storage):
+        super().__init__(500, 450, "Настройки")
         self.music_player = music_player
         self.question_loader = question_loader
+        self.settings_storage = settings_storage
 
         # ползунок громкости
         self.slider_x = 150
-        self.slider_y = 300
+        self.slider_y = 320
         self.slider_width = 200
         self.slider_height = 20
-        self.slider_pos = music_player.volume * self.slider_width  # позиция ползунка
+        self.slider_pos = music_player.volume * self.slider_width
 
         # поле ввода пути к файлу вопросов
         self.path_input_x = 50
-        self.path_input_y = 200
+        self.path_input_y = 220
         self.path_input_width = 400
         self.path_input_height = 30
         self.path_text = self.question_loader.questions_file
         self.path_input_active = False
-        self.path_input_text = pyglet.text.Label(
+        self.cursor_position = len(self.path_text)
+
+        # создаем текст для отображения пути
+        self.update_display_text()
+
+        # кнопка "Вставить"
+        self.paste_button_x = 150
+        self.paste_button_y = 180
+        self.paste_button_width = 80
+        self.paste_button_height = 25
+        self.mouse_over_paste = False
+
+        # кнопка "Загрузить"
+        self.load_button_x = 250
+        self.load_button_y = 180
+        self.load_button_width = 100
+        self.load_button_height = 30
+        self.mouse_over_load = False
+
+        # текст статуса загрузки
+        self.update_status_text()
+
+        # текст
+        self.volume_text = pyglet.text.Label("Громкость:", x=250, y=360, anchor_x='center', color=(0, 0, 0, 255))
+        self.volume_value = pyglet.text.Label(f"{int(music_player.volume * 100)}%", x=250, y=290, anchor_x='center',
+                                              color=(0, 0, 0, 255))
+
+        self.path_label = pyglet.text.Label("Путь к файлу с вопросами:", x=250, y=260, anchor_x='center',
+                                            color=(0, 0, 0, 255))
+
+        # для перетаскивания ползунка
+        self.dragging = False
+
+        # крестик закрытия
+        self.mouse_over_close = False
+
+        # мигающий курсор
+        self.cursor_visible = True
+        self.cursor_timer = 0
+        pyglet.clock.schedule_interval(self.update_cursor, 0.5)
+
+        logger.log("📊 Окно настроек открыто")
+
+    def update_display_text(self):
+        """Обновляет отображаемый текст с путем"""
+        self.display_text = pyglet.text.Label(
             self.path_text,
             x=self.path_input_x + 5, y=self.path_input_y + self.path_input_height // 2,
             anchor_y='center',
@@ -368,48 +460,37 @@ class SettingsWindow(pyglet.window.Window):
             multiline=False
         )
 
-        # кнопка "Загрузить"
-        self.load_button_x = 200
-        self.load_button_y = 150
-        self.load_button_width = 100
-        self.load_button_height = 30
-        self.mouse_over_load = False
-
-        # текст статуса загрузки
-        self.status_text = pyglet.text.Label(
-            "",
-            x=250, y=100,
-            anchor_x='center',
-            color=(0, 0, 0, 255),
-            font_size=10
-        )
+    def update_status_text(self):
+        """Обновляет текст статуса"""
         if self.question_loader.last_error:
-            self.status_text.text = f"Ошибка: {self.question_loader.last_error}"
-            self.status_text.color = RED
+            self.status_text = pyglet.text.Label(
+                f"Ошибка: {self.question_loader.last_error}",
+                x=250, y=100,
+                anchor_x='center',
+                color=RED,
+                font_size=10
+            )
         else:
-            self.status_text.text = f"Загружено {len(self.question_loader.questions)} вопросов"
-            self.status_text.color = GREEN
+            self.status_text = pyglet.text.Label(
+                f"Загружено {len(self.question_loader.questions)} вопросов",
+                x=250, y=100,
+                anchor_x='center',
+                color=GREEN,
+                font_size=10
+            )
 
-        # текст
-        self.volume_text = pyglet.text.Label("Громкость:", x=250, y=340, anchor_x='center', color=(0, 0, 0, 255))
-        self.volume_value = pyglet.text.Label(f"{int(music_player.volume * 100)}%", x=250, y=270, anchor_x='center',
-                                              color=(0, 0, 0, 255))
-
-        self.path_label = pyglet.text.Label("Путь к файлу с вопросами:", x=250, y=240, anchor_x='center',
-                                            color=(0, 0, 0, 255))
-
-        # для перетаскивания ползунка
-        self.dragging = False
-
-        # крестик закрытия
-        self.mouse_over_close = False
-
-        logger.log("📊 Окно настроек открыто")
+    def update_cursor(self, dt):
+        """Обновляет состояние мигающего курсора"""
+        if self.path_input_active:
+            self.cursor_timer += dt
+            if self.cursor_timer >= 0.5:
+                self.cursor_visible = not self.cursor_visible
+                self.cursor_timer = 0
 
     def on_draw(self):
         self.clear()
         # Белый фон
-        pyglet.shapes.Rectangle(0, 0, 500, 400, color=(255, 255, 255)).draw()
+        pyglet.shapes.Rectangle(0, 0, 500, 450, color=(255, 255, 255)).draw()
 
         # рисуем ползунок
         # фон ползунка
@@ -447,8 +528,38 @@ class SettingsWindow(pyglet.window.Window):
         path_border.draw()
 
         # текст пути
-        self.path_input_text.text = self.path_text
-        self.path_input_text.draw()
+        self.update_display_text()
+        self.display_text.draw()
+
+        # рисуем курсор если поле активно
+        if self.path_input_active and self.cursor_visible:
+            # вычисляем позицию курсора
+            cursor_x = self.path_input_x + 5 + self.display_text.content_width
+            if cursor_x < self.path_input_x + self.path_input_width - 5:
+                cursor = pyglet.shapes.Rectangle(
+                    cursor_x, self.path_input_y + 5,
+                    2, self.path_input_height - 10,
+                    color=BLACK
+                )
+                cursor.draw()
+
+        # кнопка вставки
+        paste_color = LIGHT_GREEN if self.mouse_over_paste else GRAY
+        paste_btn = pyglet.shapes.Rectangle(
+            self.paste_button_x, self.paste_button_y,
+            self.paste_button_width, self.paste_button_height,
+            color=paste_color
+        )
+        paste_btn.draw()
+        paste_label = pyglet.text.Label(
+            "Вставить",
+            x=self.paste_button_x + self.paste_button_width // 2,
+            y=self.paste_button_y + self.paste_button_height // 2,
+            anchor_x='center', anchor_y='center',
+            color=(0, 0, 0, 255),
+            font_size=9
+        )
+        paste_label.draw()
 
         # кнопка загрузки
         load_color = LIGHT_GREEN if self.mouse_over_load else GRAY
@@ -468,6 +579,7 @@ class SettingsWindow(pyglet.window.Window):
         load_label.draw()
 
         # статус
+        self.update_status_text()
         self.status_text.draw()
 
         # рисуем текст
@@ -479,9 +591,9 @@ class SettingsWindow(pyglet.window.Window):
 
         # крестик закрытия
         close_color = RED if self.mouse_over_close else GRAY
-        close_btn = pyglet.shapes.Rectangle(470, 370, 20, 20, color=close_color)
+        close_btn = pyglet.shapes.Rectangle(470, 420, 20, 20, color=close_color)
         close_btn.draw()
-        close_text = pyglet.text.Label("X", x=480, y=375, anchor_x='center', color=(0, 0, 0, 255))
+        close_text = pyglet.text.Label("X", x=480, y=425, anchor_x='center', color=(0, 0, 0, 255))
         close_text.draw()
 
     def on_mouse_press(self, x, y, button, modifiers):
@@ -497,9 +609,17 @@ class SettingsWindow(pyglet.window.Window):
             if (self.path_input_x <= x <= self.path_input_x + self.path_input_width and
                     self.path_input_y <= y <= self.path_input_y + self.path_input_height):
                 self.path_input_active = True
+                self.cursor_position = len(self.path_text)
+                self.cursor_visible = True
+                self.cursor_timer = 0
                 logger.log("📝 Активировано поле ввода пути")
             else:
                 self.path_input_active = False
+
+            # проверяем клик по кнопке вставки
+            if (self.paste_button_x <= x <= self.paste_button_x + self.paste_button_width and
+                    self.paste_button_y <= y <= self.paste_button_y + self.paste_button_height):
+                self.paste_from_clipboard()
 
             # проверяем клик по кнопке загрузки
             if (self.load_button_x <= x <= self.load_button_x + self.load_button_width and
@@ -507,14 +627,21 @@ class SettingsWindow(pyglet.window.Window):
                 self.load_questions()
 
             # проверяем клик по крестику
-            if 470 <= x <= 490 and 370 <= y <= 390:
+            if 470 <= x <= 490 and 420 <= y <= 440:
                 logger.log("❌ Окно настроек закрыто")
+                # Сохраняем настройки перед закрытием
+                self.save_settings()
+                # Возобновляем игру
+                self.resume_game()
+                pyglet.clock.unschedule(self.update_cursor)
                 self.close()
 
     def on_mouse_release(self, x, y, button, modifiers):
         if self.dragging:
             self.dragging = False
             logger.log(f"🎚️ Громкость установлена на {int(self.music_player.volume * 100)}%")
+            # Сохраняем настройки при изменении громкости
+            self.save_settings()
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         if self.dragging:
@@ -526,7 +653,10 @@ class SettingsWindow(pyglet.window.Window):
 
     def on_mouse_motion(self, x, y, dx, dy):
         # проверяем наведение на крестик
-        self.mouse_over_close = (470 <= x <= 490 and 370 <= y <= 390)
+        self.mouse_over_close = (470 <= x <= 490 and 420 <= y <= 440)
+        # проверяем наведение на кнопку вставки
+        self.mouse_over_paste = (self.paste_button_x <= x <= self.paste_button_x + self.paste_button_width and
+                                 self.paste_button_y <= y <= self.paste_button_y + self.paste_button_height)
         # проверяем наведение на кнопку загрузки
         self.mouse_over_load = (self.load_button_x <= x <= self.load_button_x + self.load_button_width and
                                 self.load_button_y <= y <= self.load_button_y + self.load_button_height)
@@ -534,15 +664,83 @@ class SettingsWindow(pyglet.window.Window):
     def on_text(self, text):
         """Обработка ввода текста"""
         if self.path_input_active:
-            self.path_text += text
+            # вставляем текст в позицию курсора
+            self.path_text = self.path_text[:self.cursor_position] + text + self.path_text[self.cursor_position:]
+            self.cursor_position += len(text)
             logger.log(f"📝 Ввод: {text}")
 
     def on_text_motion(self, motion):
         """Обработка специальных клавиш"""
         if self.path_input_active:
             if motion == pyglet.window.key.MOTION_BACKSPACE:
-                self.path_text = self.path_text[:-1]
-                logger.log("📝 Backspace")
+                if self.cursor_position > 0:
+                    self.path_text = self.path_text[:self.cursor_position - 1] + self.path_text[self.cursor_position:]
+                    self.cursor_position -= 1
+                    logger.log("📝 Backspace")
+            elif motion == pyglet.window.key.MOTION_DELETE:
+                if self.cursor_position < len(self.path_text):
+                    self.path_text = self.path_text[:self.cursor_position] + self.path_text[self.cursor_position + 1:]
+                    logger.log("📝 Delete")
+            elif motion == pyglet.window.key.MOTION_LEFT:
+                if self.cursor_position > 0:
+                    self.cursor_position -= 1
+                    logger.log("📝 Курсор влево")
+            elif motion == pyglet.window.key.MOTION_RIGHT:
+                if self.cursor_position < len(self.path_text):
+                    self.cursor_position += 1
+                    logger.log("📝 Курсор вправо")
+            elif motion == pyglet.window.key.MOTION_BEGINNING_OF_LINE:
+                self.cursor_position = 0
+                logger.log("📝 Курсор в начало")
+            elif motion == pyglet.window.key.MOTION_END_OF_LINE:
+                self.cursor_position = len(self.path_text)
+                logger.log("📝 Курсор в конец")
+
+    def paste_from_clipboard(self):
+        """Вставляет текст из буфера обмена"""
+        try:
+            # Пытаемся получить текст из буфера обмена разными способами
+            clipboard_text = None
+
+            # Способ 1: через pyglet (может не работать на некоторых системах)
+            try:
+                clipboard_text = pyglet.app.platform.get_default().get_clipboard_text()
+            except:
+                pass
+
+            # Способ 2: через Tkinter (более надежный)
+            if not clipboard_text:
+                try:
+                    import tkinter as tk
+                    root = tk.Tk()
+                    root.withdraw()  # скрываем окно
+                    clipboard_text = root.clipboard_get()
+                    root.destroy()
+                except:
+                    pass
+
+            # Способ 3: через PyQt5 если установлен
+            if not clipboard_text:
+                try:
+                    from PyQt5.QtWidgets import QApplication
+                    import sys
+                    app = QApplication.instance()
+                    if not app:
+                        app = QApplication(sys.argv)
+                    clipboard_text = app.clipboard().text()
+                except:
+                    pass
+
+            if clipboard_text:
+                # Вставляем текст в текущую позицию курсора
+                self.path_text = self.path_text[:self.cursor_position] + clipboard_text + self.path_text[
+                    self.cursor_position:]
+                self.cursor_position += len(clipboard_text)
+                logger.log(f"📋 Вставлено из буфера: {clipboard_text}")
+            else:
+                logger.log("📋 Буфер обмена пуст или не удалось получить данные")
+        except Exception as e:
+            logger.log(f"❌ Ошибка вставки из буфера: {e}")
 
     def load_questions(self):
         """Загружает вопросы по указанному пути"""
@@ -550,13 +748,37 @@ class SettingsWindow(pyglet.window.Window):
         success = self.question_loader.set_questions_path(self.path_text)
 
         if success:
-            self.status_text.text = f"Загружено {len(self.question_loader.questions)} вопросов"
-            self.status_text.color = GREEN
             logger.log("✅ Вопросы успешно загружены")
         else:
-            self.status_text.text = f"Ошибка: {self.question_loader.last_error}"
-            self.status_text.color = RED
             logger.log(f"❌ Ошибка загрузки вопросов: {self.question_loader.last_error}")
+
+        # Сохраняем настройки после загрузки
+        self.save_settings()
+
+    def save_settings(self):
+        """Сохраняет текущие настройки"""
+        self.settings_storage.save_settings(
+            self.path_text,
+            self.music_player.volume
+        )
+
+    def resume_game(self):
+        """Возобновляет игру после закрытия настроек"""
+        global game_paused, settings_window
+        game_paused = False
+        settings_window = None
+        pyglet.clock.schedule_interval(update, 1 / 60.0)
+        logger.log("▶️ Игра возобновлена после настроек")
+
+    def on_close(self):
+        """Обработчик закрытия окна (крестик, Alt+F4 и т.д.)"""
+        logger.log("❌ Окно настроек закрыто (on_close)")
+        # Сохраняем настройки
+        self.save_settings()
+        # Возобновляем игру
+        self.resume_game()
+        pyglet.clock.unschedule(self.update_cursor)
+        super().on_close()  # вызываем родительский метод
 
 
 # Создаем окошко
@@ -816,12 +1038,24 @@ class Tamagochi:
             eye2.draw()
 
 
-# создаем питомца, фон, загрузчик вопросов и музыку
+# создаем хранилище настроек
+settings_storage = SettingsStorage()
+
+# создаем питомца, фон, загрузчик вопросов и музыку с сохраненными настройками
 logger.log("🚀 Запуск Тамагочи...")
 pet = Tamagochi()
 background = AnimatedBackground(800, 600)
-question_loader = QuestionLoader()  # Создаем загрузчик вопросов
-background_music = BackgroundMusic()
+
+# Загружаем сохраненный путь к вопросам или используем по умолчанию
+saved_path = settings_storage.settings.get("questions_path", "")
+if saved_path and os.path.exists(saved_path):
+    question_loader = QuestionLoader(saved_path)
+else:
+    question_loader = QuestionLoader()  # Создаем загрузчик вопросов по умолчанию
+
+# Создаем музыку с сохраненной громкостью
+saved_volume = settings_storage.settings.get("music_volume", 0.3)
+background_music = BackgroundMusic(saved_volume)
 background_music.start()
 
 # окно настроек
@@ -967,15 +1201,18 @@ def on_mouse_press(x, y, button, modifiers):
         if 500 <= x <= 600 and 500 <= y <= 550:
             # Кормление - открываем окно вопроса и ставим игру на паузу
             game_paused = True
-            question_window = pet.feed(question_loader)  # Передаем загрузчик вопросов
+            question_window = pet.feed(question_loader)
         elif 620 <= x <= 720 and 500 <= y <= 550:
             # Игра - открываем окно вопроса и ставим игру на паузу
             game_paused = True
-            question_window = pet.play(question_loader)  # Передаем загрузчик вопросов
+            question_window = pet.play(question_loader)
         elif gear.check_click(x, y):
             if settings_window is None or not settings_window.visible:
                 logger.log("⚙️ Открытие окна настроек")
-                settings_window = SettingsWindow(background_music, question_loader)
+                # Ставим игру на паузу при открытии настроек
+                game_paused = True
+                pyglet.clock.unschedule(update)
+                settings_window = SettingsWindow(background_music, question_loader, settings_storage)
             else:
                 logger.log("⚙️ Закрытие окна настроек")
                 settings_window.close()
